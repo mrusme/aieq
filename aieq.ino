@@ -60,9 +60,9 @@ void setup() {
     digitalWrite(LED_BUILTIN, HIGH);
 
     Serial.begin(115200);
-    while(!Serial) {
-        ;
-    }
+    // while(!Serial) {
+    //     ;
+    // }
 
     if(WiFi.status() == WL_NO_SHIELD) {
         Serial.println("WiFi not available!");
