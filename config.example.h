@@ -1,5 +1,6 @@
 #define WIFI_SSID ""
 #define WIFI_PASS ""
+#define HOSTNAME ""
 #define SEALEVELPRESSURE_HPA (1013.25)
 
 #define NTP_SERVER "pool.ntp.org"

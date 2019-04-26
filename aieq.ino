@@ -37,33 +37,7 @@ int get_free_ram() {
     return &stack_dummy - sbrk(0);
 }
 
-void displaySensorDetails(void)
-{
-    sensor_t sensor;
-    tsl.getSensor(&sensor);
-    Serial.println(F("------------------------------------"));
-    Serial.print  (F("Sensor:       ")); Serial.println(sensor.name);
-    Serial.print  (F("Driver Ver:   ")); Serial.println(sensor.version);
-    Serial.print  (F("Unique ID:    ")); Serial.println(sensor.sensor_id);
-    Serial.print  (F("Max Value:    ")); Serial.print(sensor.max_value); Serial.println(F(" lux"));
-    Serial.print  (F("Min Value:    ")); Serial.print(sensor.min_value); Serial.println(F(" lux"));
-    Serial.print  (F("Resolution:   ")); Serial.print(sensor.resolution, 4); Serial.println(F(" lux"));
-    Serial.println(F("------------------------------------"));
-    Serial.println(F(""));
-    delay(500);
-}
-
-void setup() {
-    WiFi.setPins(8,7,4,2);
-
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, HIGH);
-
-    Serial.begin(115200);
-    // while(!Serial) {
-    //     ;
-    // }
-
+void setupWiFi(void) {
     if(WiFi.status() == WL_NO_SHIELD) {
         Serial.println("WiFi not available!");
         while(true) {
@@ -75,7 +49,53 @@ void setup() {
     }
 
     WiFi.lowPowerMode();
+}
 
+void setupBME(void) {
+    if(bme.begin()) {
+        Serial.println("Found BME680 sensor!");
+    } else {
+        Serial.println("No BME680 sensor found... check your wiring?");
+        while(true) {
+            delay(10000);
+        }
+    }
+    Serial.println("Setting temperature oversampling ...");
+    bme.setTemperatureOversampling(BME680_OS_8X);
+    Serial.println("Setting humidity oversampling ...");
+    bme.setHumidityOversampling(BME680_OS_2X);
+    Serial.println("Setting pressure oversampling ...");
+    bme.setPressureOversampling(BME680_OS_4X);
+    Serial.println("Setting IIR filter size ...");
+    bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
+    Serial.println("Setting gas heater ...");
+    bme.setGasHeater(320, 150); // 320*C for 150 ms
+}
+
+void setupTSL(void) {
+    if (tsl.begin()) {
+        Serial.println("Found TSL2591 sensor!");
+    } else {
+        Serial.println(F("No TSL2591 sensor found... check your wiring?"));
+        while(true) {
+            delay(10000);
+        }
+    }
+
+    sensor_t sensor;
+    tsl.getSensor(&sensor);
+    Serial.println(F("------------------------------------"));
+    Serial.print  (F("Sensor:       ")); Serial.println(sensor.name);
+    Serial.print  (F("Driver Ver:   ")); Serial.println(sensor.version);
+    Serial.print  (F("Unique ID:    ")); Serial.println(sensor.sensor_id);
+    Serial.print  (F("Max Value:    ")); Serial.print(sensor.max_value); Serial.println(F(" lux"));
+    Serial.print  (F("Min Value:    ")); Serial.print(sensor.min_value); Serial.println(F(" lux"));
+    Serial.print  (F("Resolution:   ")); Serial.print(sensor.resolution, 4); Serial.println(F(" lux"));
+    Serial.println(F("------------------------------------"));
+    Serial.println(F(""));
+}
+
+void connectWiFi(void) {
     while(wifi_status != WL_CONNECTED) {
         Serial.print("Attempting to connect to SSID: ");
         Serial.println(wifi_ssid);
@@ -92,32 +112,26 @@ void setup() {
     Serial.print("RSSI: ");
     Serial.print(rssi);
     Serial.println(" dBm");
+}
+
+void setup() {
+    WiFi.setPins(8,7,4,2);
+
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
+
+    Serial.begin(115200);
+    // while(!Serial) {
+    //     ;
+    // }
+
+    setupWiFi();
 
     Serial.println("Starting timeClient ...");
     timeClient.begin();
 
-    Serial.println("Setting temperature oversampling ...");
-    bme.setTemperatureOversampling(BME680_OS_8X);
-    Serial.println("Setting humidity oversampling ...");
-    bme.setHumidityOversampling(BME680_OS_2X);
-    Serial.println("Setting pressure oversampling ...");
-    bme.setPressureOversampling(BME680_OS_4X);
-    Serial.println("Setting IIR filter size ...");
-    bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
-    Serial.println("Setting gas heater ...");
-    bme.setGasHeater(320, 150); // 320*C for 150 ms
-
-    if (tsl.begin())
-    {
-        Serial.println(F("Found a TSL2591 sensor"));
-    }
-    else
-    {
-        Serial.println(F("No sensor found ... check your wiring?"));
-        while (1);
-    }
-
-    displaySensorDetails();
+    setupBME();
+    setupTSL();
 }
 
 void loop() {
@@ -128,6 +142,8 @@ void loop() {
     String line, local_ip, epoch_seconds;
     String infrared, spectrum_full, spectrum_visible, lux; // TSL2591
     String temperature, pressure, humidity, gas, altitude; // BME680
+
+    connectWiFi();
 
     Serial.println("Updating timeClient ...");
     timeClient.update();
@@ -171,10 +187,10 @@ void loop() {
         altitude = String(bme.readAltitude(SEALEVELPRESSURE_HPA)); // Meters
     }
 
-    local_ip = WiFi.localIP();
+    // local_ip = WiFi.localIP();
     epoch_seconds = String(timeClient.getEpochTime());
 
-    line = String("aieq,host=" + local_ip + " light_infrared=" + infrared + ",light_spectrum_full=" + spectrum_full + ",light_spectrum_visible=" + spectrum_visible + ",light_lux=" + lux + ",temperature=" + temperature + ",pressure=" + pressure + ",humidity=" + humidity + ",gas=" + gas + ",altitude=" + altitude + " " + epoch_seconds + "000000000");
+    line = String("aieq,host=" + String(HOSTNAME) + " light_infrared=" + infrared + ",light_spectrum_full=" + spectrum_full + ",light_spectrum_visible=" + spectrum_visible + ",light_lux=" + lux + ",temperature=" + temperature + ",pressure=" + pressure + ",humidity=" + humidity + ",gas=" + gas + ",altitude=" + altitude + " " + epoch_seconds + "000000000");
 
     Serial.println("Sending UDP packet...");
     Udp.beginPacket(INFLUXDB_IP, INFLUXDB_UDP_PORT);
