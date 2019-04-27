@@ -218,6 +218,6 @@ void loop() {
 
     Serial.println("Sleeping ...");
     digitalWrite(LED_BUILTIN, LOW);
-    // Watchdog.sleep(MEASURE_INTERVAL_MS);
-    delay(10000);
+    Watchdog.sleep(MEASURE_INTERVAL_MS);
+    // delay(10000);
 }
