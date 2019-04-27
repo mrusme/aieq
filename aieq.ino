@@ -17,19 +17,17 @@
 
 #include "config.h"
 
-int  wifi_status = WL_IDLE_STATUS;
 char wifi_ssid[] = WIFI_SSID;
 char wifi_pass[] = WIFI_PASS;
 
 WiFiUDP Udp;
+NTPClient timeClient(Udp, NTP_SERVER, NTP_OFFSET, NTP_INTERVAL);
 
 Adafruit_BME680 bme; // I2C
 // Adafruit_BME680 bme(BME_CS); // hardware SPI
 // Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 
 Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
-
-NTPClient timeClient(Udp, NTP_SERVER, NTP_OFFSET, NTP_INTERVAL);
 
 extern "C" char *sbrk(int i);
 int get_free_ram() {
@@ -96,10 +94,10 @@ void setupTSL(void) {
 }
 
 void connectWiFi(void) {
-    while(wifi_status != WL_CONNECTED) {
+    while(WiFi.status() != WL_CONNECTED) {
         Serial.print("Attempting to connect to SSID: ");
         Serial.println(wifi_ssid);
-        wifi_status = WiFi.begin(wifi_ssid, wifi_pass);
+        WiFi.begin(wifi_ssid, wifi_pass);
 
         delay(10000);
     }
@@ -128,7 +126,8 @@ void setup() {
     setupWiFi();
 
     Serial.println("Starting timeClient ...");
-    timeClient.begin();
+
+    Serial.println("Starting timeClient ...");
 
     setupBME();
     setupTSL();
@@ -139,12 +138,12 @@ void loop() {
 
     digitalWrite(LED_BUILTIN, HIGH);
 
-    String line, local_ip, epoch_seconds;
-    String infrared, spectrum_full, spectrum_visible, lux; // TSL2591
-    String temperature, pressure, humidity, gas, altitude; // BME680
+    char line[256];
 
     connectWiFi();
 
+    Serial.println("Beginning timeClient ...");
+    timeClient.begin();
     Serial.println("Updating timeClient ...");
     timeClient.update();
 
@@ -161,44 +160,64 @@ void loop() {
 
     Serial.println("Performing TSL2591 read ...");
     uint32_t lum = tsl.getFullLuminosity();
-    uint16_t ir, full;
-    ir = lum >> 16;
-    full = lum & 0xFFFF;
+    uint16_t infrared, spectrum_full;
+    infrared = lum >> 16;
+    spectrum_full = lum & 0xFFFF;
+    int spectrum_visible = infrared - spectrum_full;
+    float lux = tsl.calculateLux(spectrum_full, infrared);
 
-    infrared = String(ir);
-    spectrum_full = String(full);
-    spectrum_visible = String(full - ir);
-    lux = String(tsl.calculateLux(full, ir));
+    float temperature, pressure, humidity, gas, altitude;
 
     Serial.println("Performing BME680 read ...");
     if(!bme.performReading()) {
         Serial.println("Failed to perform reading!");
-        temperature = "0";
-        pressure = "0";
-        humidity = "0";
-        gas = "0";
-        altitude = "0";
+        temperature = 0.0;
+        pressure = 0.0;
+        humidity = 0.0;
+        gas = 0.0;
+        altitude = 0.0;
     } else {
         Serial.println("Successfully finished BME680 read!");
-        temperature = String(bme.temperature, 2); // °C
-        pressure = String((bme.pressure / 100.0)); // hPa
-        humidity = String(bme.humidity); // %
-        gas = String(bme.gas_resistance); // Ohms
-        altitude = String(bme.readAltitude(SEALEVELPRESSURE_HPA)); // Meters
+        temperature = bme.temperature; // °C
+        pressure = (bme.pressure / 100.0); // hPa
+        humidity = bme.humidity; // %
+        gas = bme.gas_resistance; // Ohms
+        altitude = bme.readAltitude(SEALEVELPRESSURE_HPA); // Meters
     }
 
-    // local_ip = WiFi.localIP();
-    epoch_seconds = String(timeClient.getEpochTime());
+    uint32_t epoch_seconds = timeClient.getEpochTime();
 
-    line = String("aieq,host=" + String(HOSTNAME) + " light_infrared=" + infrared + ",light_spectrum_full=" + spectrum_full + ",light_spectrum_visible=" + spectrum_visible + ",light_lux=" + lux + ",temperature=" + temperature + ",pressure=" + pressure + ",humidity=" + humidity + ",gas=" + gas + ",altitude=" + altitude + " " + epoch_seconds + "000000000");
+    snprintf(line, sizeof(line), "aieq,host=%s light_infrared=%u,light_spectrum_full=%u,light_spectrum_visible=%u,light_lux=%f,temperature=%f,pressure=%f,humidity=%f,gas=%f,altitude=%f %u000000000", HOSTNAME, infrared, spectrum_full, spectrum_visible, lux, temperature, pressure, humidity, gas, altitude, epoch_seconds);
 
     Serial.println("Sending UDP packet...");
-    Udp.beginPacket(INFLUXDB_IP, INFLUXDB_UDP_PORT);
-    Udp.print(line);
-    Udp.endPacket();
-    Serial.println("Sent UDP packet:");
-    Serial.println(line);
+    if(Udp.beginPacket(INFLUXDB_IP, INFLUXDB_UDP_PORT) == 1) {
+        Serial.println("Began UDP packet ...");
+    } else {
+        Serial.println("Could not begin UDP packet!");
+    }
+    int wrote_number = Udp.print(line);
+    Serial.println("Wrote:");
+    Serial.println(wrote_number);
+    if(Udp.endPacket() == 1) {
+        Serial.println("Sent UDP packet:");
+    } else {
+        Serial.println("Could not send UDP packet:");
+    }
+    yield();
 
+    Serial.println(line);
+    Serial.println("Stopping UDP ...");
+    Udp.stop();
+    Serial.println("Ending timeClient ...");
+    timeClient.end();
+    yield();
+    delay(2000);
+
+    Serial.println("Disconnecting from WiFi ...");
+    WiFi.end();
+
+    Serial.println("Sleeping ...");
     digitalWrite(LED_BUILTIN, LOW);
-    Watchdog.sleep(MEASURE_INTERVAL_MS);
+    // Watchdog.sleep(MEASURE_INTERVAL_MS);
+    delay(10000);
 }
