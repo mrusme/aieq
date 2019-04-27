@@ -20,6 +20,12 @@
 char wifi_ssid[] = WIFI_SSID;
 char wifi_pass[] = WIFI_PASS;
 
+#define NUMBER_OF_LINES 30
+#define LENGTH_OF_LINE 256
+
+char lines[NUMBER_OF_LINES][LENGTH_OF_LINE];
+int line_iterator = 0;
+
 WiFiUDP Udp;
 NTPClient timeClient(Udp, NTP_SERVER, NTP_OFFSET, NTP_INTERVAL);
 
@@ -112,40 +118,11 @@ void connectWiFi(void) {
     Serial.println(" dBm");
 }
 
-void setup() {
-    WiFi.setPins(8,7,4,2);
-
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, HIGH);
-
-    Serial.begin(115200);
-    // while(!Serial) {
-    //     ;
-    // }
-
-    setupWiFi();
-
-    Serial.println("Starting timeClient ...");
-
-    Serial.println("Starting timeClient ...");
-
-    setupBME();
-    setupTSL();
-}
-
-void loop() {
-    Serial.println("Looping ...");
-
-    digitalWrite(LED_BUILTIN, HIGH);
-
-    char line[256];
-
-    connectWiFi();
-
-    Serial.println("Beginning timeClient ...");
-    timeClient.begin();
-    Serial.println("Updating timeClient ...");
-    timeClient.update();
+void readSensors(void) {
+    if(line_iterator >= NUMBER_OF_LINES) {
+        Serial.println("Could not read sensors: Line iterator larger than buffer!");
+        return;
+    }
 
     //tsl.setGain(TSL2591_GAIN_LOW);    // 1x gain (bright light)
     tsl.setGain(TSL2591_GAIN_MED);      // 25x gain
@@ -187,7 +164,28 @@ void loop() {
 
     uint32_t epoch_seconds = timeClient.getEpochTime();
 
-    snprintf(line, sizeof(line), "aieq,host=%s light_infrared=%u,light_spectrum_full=%u,light_spectrum_visible=%u,light_lux=%f,temperature=%f,pressure=%f,humidity=%f,gas=%f,altitude=%f %u000000000", HOSTNAME, infrared, spectrum_full, spectrum_visible, lux, temperature, pressure, humidity, gas, altitude, epoch_seconds);
+    snprintf(lines[line_iterator], (LENGTH_OF_LINE * sizeof(char)), "aieq,host=%s light_infrared=%u,light_spectrum_full=%u,light_spectrum_visible=%u,light_lux=%f,temperature=%f,pressure=%f,humidity=%f,gas=%f,altitude=%f %u000000000", HOSTNAME, infrared, spectrum_full, spectrum_visible, lux, temperature, pressure, humidity, gas, altitude, epoch_seconds);
+    return;
+}
+
+int maybeFlushLines(void) {
+    int retval = 1;
+
+    line_iterator++;
+
+    if(line_iterator < NUMBER_OF_LINES) {
+        Serial.println("Not flushing yet ...");
+        return retval;
+    }
+
+    Serial.println("Time to flush!");
+
+    connectWiFi();
+
+    Serial.println("Beginning timeClient ...");
+    timeClient.begin();
+    Serial.println("Updating timeClient ...");
+    timeClient.update();
 
     Serial.println("Sending UDP packet...");
     if(Udp.beginPacket(INFLUXDB_IP, INFLUXDB_UDP_PORT) == 1) {
@@ -195,19 +193,28 @@ void loop() {
     } else {
         Serial.println("Could not begin UDP packet!");
     }
-    int wrote_number = Udp.print(line);
-    Serial.println("Wrote:");
-    Serial.println(wrote_number);
-    if(Udp.endPacket() == 1) {
-        Serial.println("Sent UDP packet:");
-    } else {
-        Serial.println("Could not send UDP packet:");
-    }
-    yield();
 
-    Serial.println(line);
+    for(int i = 0; i < NUMBER_OF_LINES; i++) {
+        char *line = lines[i];
+
+        int wrote_number = Udp.print(line);
+        Serial.println("Wrote:");
+        Serial.println(wrote_number);
+        if(Udp.endPacket() == 1) {
+            Serial.println("Sent UDP packet:");
+            Serial.println(line);
+        } else {
+            Serial.println("Could not send UDP packet:");
+            Serial.println(line);
+            retval = 0;
+        }
+        yield();
+    }
+
     Serial.println("Stopping UDP ...");
     Udp.stop();
+    yield();
+
     Serial.println("Ending timeClient ...");
     timeClient.end();
     yield();
@@ -216,8 +223,43 @@ void loop() {
     Serial.println("Disconnecting from WiFi ...");
     WiFi.end();
 
+    if(retval == 1) {
+        line_iterator = 0;
+    }
+
+    return retval;
+}
+
+void setup() {
+    WiFi.setPins(8,7,4,2);
+
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
+
+    Serial.begin(115200);
+    // while(!Serial) {
+    //     ;
+    // }
+
+    setupWiFi();
+
+    Serial.println("Starting timeClient ...");
+
+    Serial.println("Starting timeClient ...");
+
+    setupBME();
+    setupTSL();
+}
+
+void loop() {
+    Serial.println("Looping ...");
+    digitalWrite(LED_BUILTIN, HIGH);
+
+    readSensors();
+    maybeFlushLines();
+
     Serial.println("Sleeping ...");
     digitalWrite(LED_BUILTIN, LOW);
     Watchdog.sleep(MEASURE_INTERVAL_MS);
-    // delay(10000);
+    // delay(1000);
 }
