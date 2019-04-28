@@ -30,6 +30,8 @@ WiFiUDP Udp;
 WiFiClient Tcp;
 NTPClient timeClient(Udp, NTP_SERVER, NTP_OFFSET, NTP_INTERVAL);
 
+uint32_t epoch_seconds = 0;
+
 Adafruit_BME680 bme; // I2C
 // Adafruit_BME680 bme(BME_CS); // hardware SPI
 // Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
@@ -119,6 +121,28 @@ void connectWiFi(void) {
     Serial.println(" dBm");
 }
 
+void disconnectWiFi(void) {
+    delay(1000);
+    Serial.println("Disconnecting from WiFi ...");
+    WiFi.end();
+    yield();
+}
+
+void updateTime(void) {
+    Serial.println("Beginning timeClient ...");
+    timeClient.begin();
+    Serial.println("Updating timeClient ...");
+    timeClient.update();
+
+    yield();
+    epoch_seconds = timeClient.getEpochTime();
+
+    Serial.println("Ending timeClient ...");
+    timeClient.end();
+    yield();
+    delay(1000);
+}
+
 void readSensors(void) {
     if(line_iterator >= NUMBER_OF_LINES) {
         Serial.println("Could not read sensors: Line iterator larger than buffer!");
@@ -162,8 +186,6 @@ void readSensors(void) {
         gas = bme.gas_resistance; // Ohms
         altitude = bme.readAltitude(SEALEVELPRESSURE_HPA); // Meters
     }
-
-    uint32_t epoch_seconds = timeClient.getEpochTime();
 
     snprintf(lines[line_iterator], (LENGTH_OF_LINE * sizeof(char)), "aieq,host=%s light_infrared=%u,light_spectrum_full=%u,light_spectrum_visible=%u,light_lux=%f,temperature=%f,pressure=%f,humidity=%f,gas=%f,altitude=%f %u000000000", HOSTNAME, infrared, spectrum_full, spectrum_visible, lux, temperature, pressure, humidity, gas, altitude, epoch_seconds);
     return;
@@ -266,29 +288,18 @@ int maybeFlushLines(void) {
     Serial.println("Time to flush!");
 
     connectWiFi();
-
-    Serial.println("Beginning timeClient ...");
-    timeClient.begin();
-    Serial.println("Updating timeClient ...");
-    timeClient.update();
+    updateTime();
 
     retval = sendLines();
     if(retval == 1) {
         flushLines();
     }
 
-    Serial.println("Ending timeClient ...");
-    timeClient.end();
-    yield();
-    delay(2000);
-
-    Serial.println("Disconnecting from WiFi ...");
-    WiFi.end();
-
     if(retval == 1) {
         line_iterator = 0;
     }
 
+    disconnectWiFi();
     return retval;
 }
 
@@ -304,10 +315,9 @@ void setup() {
     // }
 
     setupWiFi();
-
-    Serial.println("Starting timeClient ...");
-
-    Serial.println("Starting timeClient ...");
+    connectWiFi();
+    updateTime();
+    disconnectWiFi();
 
     setupBME();
     setupTSL();
@@ -315,14 +325,20 @@ void setup() {
 }
 
 void loop() {
-    Watchdog.sleep(MEASURE_INTERVAL_MS);
+    int slept_ms = Watchdog.sleep(MEASURE_INTERVAL_MS);
+
     Serial.println("Looping ...");
     digitalWrite(LED_BUILTIN, HIGH);
+
+    // int slept_ms = 1000;
+    epoch_seconds += (int)(slept_ms / 1000);
+    Serial.println("The time is now:");
+    Serial.println(epoch_seconds);
 
     readSensors();
     maybeFlushLines();
 
     Serial.println("Sleeping ...");
     digitalWrite(LED_BUILTIN, LOW);
-    delay(1000);
+    // delay(1000);
 }
