@@ -27,6 +27,7 @@ char lines[NUMBER_OF_LINES][LENGTH_OF_LINE];
 int line_iterator = 0;
 
 WiFiUDP Udp;
+WiFiClient Tcp;
 NTPClient timeClient(Udp, NTP_SERVER, NTP_OFFSET, NTP_INTERVAL);
 
 Adafruit_BME680 bme; // I2C
@@ -168,24 +169,9 @@ void readSensors(void) {
     return;
 }
 
-int maybeFlushLines(void) {
+#if INFLUXDB_PROTO == 0
+int sendLines(void) {
     int retval = 1;
-
-    line_iterator++;
-
-    if(line_iterator < NUMBER_OF_LINES) {
-        Serial.println("Not flushing yet ...");
-        return retval;
-    }
-
-    Serial.println("Time to flush!");
-
-    connectWiFi();
-
-    Serial.println("Beginning timeClient ...");
-    timeClient.begin();
-    Serial.println("Updating timeClient ...");
-    timeClient.update();
 
     Serial.println("Sending UDP packet...");
     if(Udp.beginPacket(INFLUXDB_IP, INFLUXDB_UDP_PORT) == 1) {
@@ -214,6 +200,82 @@ int maybeFlushLines(void) {
     Serial.println("Stopping UDP ...");
     Udp.stop();
     yield();
+
+    return retval;
+}
+#else
+int sendLines(void) {
+    int retval = 1;
+    char url[256];
+    char host[64];
+    char clength[32];
+
+    snprintf(url, 256, "POST /write?db=%s&u=%s&p=%s HTTP/1.1", INFLUXDB_DATABSE, INFLUXDB_USERNAME, INFLUXDB_PASSWORD);
+    snprintf(host, 64, "Host: %u.%u.%u.%u:%i", INFLUXDB_IP[0], INFLUXDB_IP[1], INFLUXDB_IP[2], INFLUXDB_IP[3], INFLUXDB_TCP_PORT);
+
+    for(int i = 0; i < NUMBER_OF_LINES; i++) {
+        char *line = lines[i];
+
+        Serial.println("Sending HTTP request...");
+        if(Tcp.connect(INFLUXDB_IP, INFLUXDB_TCP_PORT)) {
+            Serial.println("Connected to HTTP server ...");
+
+            Tcp.println(url);
+            Serial.println(url);
+            Tcp.println(host);
+            Serial.println(host);
+            Tcp.println("User-Agent: aieq/1.1");
+            snprintf(clength, 32, "Content-Length: %i", strlen(line));
+            Tcp.println(clength);
+            Serial.println(clength);
+            Tcp.println("Connection: close");
+            Tcp.println();
+            Tcp.println(line);
+            Serial.println(line);
+            Tcp.println();
+        } else {
+            Serial.println("Could not connect to HTTP server!");
+            retval = 0;
+        }
+        Serial.println("Terminating HTTP request...");
+        Tcp.stop();
+        yield();
+    }
+    yield();
+
+    return retval;
+}
+#endif
+
+void flushLines(void) {
+    for(int i = 0; i < NUMBER_OF_LINES; i++) {
+        memset(lines[i], 0, LENGTH_OF_LINE);
+    }
+}
+
+int maybeFlushLines(void) {
+    int retval = 1;
+
+    line_iterator++;
+
+    if(line_iterator < NUMBER_OF_LINES) {
+        Serial.println("Not flushing yet ...");
+        return retval;
+    }
+
+    Serial.println("Time to flush!");
+
+    connectWiFi();
+
+    Serial.println("Beginning timeClient ...");
+    timeClient.begin();
+    Serial.println("Updating timeClient ...");
+    timeClient.update();
+
+    retval = sendLines();
+    if(retval == 1) {
+        flushLines();
+    }
 
     Serial.println("Ending timeClient ...");
     timeClient.end();

@@ -11,3 +11,9 @@
 
 IPAddress INFLUXDB_IP(10, 10, 10, 10);
 int INFLUXDB_UDP_PORT = 8089;
+int INFLUXDB_TCP_PORT = 8086;
+#define INFLUXDB_PROTO 1 // 0 for UDP, 1 for TCP
+// For TCP only:
+#define INFLUXDB_DATABSE "database"
+#define INFLUXDB_USERNAME ""
+#define INFLUXDB_PASSWORD ""
