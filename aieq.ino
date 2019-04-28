@@ -311,9 +311,11 @@ void setup() {
 
     setupBME();
     setupTSL();
+    digitalWrite(LED_BUILTIN, LOW);
 }
 
 void loop() {
+    Watchdog.sleep(MEASURE_INTERVAL_MS);
     Serial.println("Looping ...");
     digitalWrite(LED_BUILTIN, HIGH);
 
@@ -322,6 +324,5 @@ void loop() {
 
     Serial.println("Sleeping ...");
     digitalWrite(LED_BUILTIN, LOW);
-    Watchdog.sleep(MEASURE_INTERVAL_MS);
-    // delay(1000);
+    delay(1000);
 }
